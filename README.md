@@ -70,7 +70,7 @@ By default, the server will listen on port `443`.
   - Method: `POST`
   - Requires a valid `User-Agent` header from the allowed list.
 
-- **/cache/{file}**
+- **/cache/{cdn}/{file}**
   - Method: `GET`
   - Requires a valid `User-Agent` header from the allowed list.
 
