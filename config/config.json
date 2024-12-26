@@ -1,0 +1,7 @@
+{
+    "ip": "127.0.0.1",
+    "port": 17091,
+    "loginurl": "your loginurl",
+    "ratelimit": 250,
+    "cdn": "0098/516691/"
+  }  
