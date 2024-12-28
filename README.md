@@ -9,6 +9,7 @@ This project is a Go-based HTTP server designed to handle GTPS server requests s
 - **User Agent Validation**: Only allows specific user agents to access certain endpoints.
 - **Static File Handling**: Serves files from the local server or redirects to a CDN if the file is not found locally.
 - **TLS Encryption**: Uses TLS 1.2 or higher for secure communication.
+- **Flood Protection**: Detects and prevents flood attacks by limiting the number of requests from a single IP address within a short period.
 
 ## Requirements
 
@@ -73,6 +74,15 @@ By default, the server will listen on port `443`.
 - **/cache/{cdn}/{file}**
   - Method: `GET`
   - Requires a valid `User-Agent` header from the allowed list.
+
+## Changelog
+
+### v1.1.0
+
+- Added flood protection to detect and prevent flood attacks.
+- Improved rate limiting logic to ignore specific paths (`/growtopia/server_data.php` and `/cache/*`).
+- Enhanced logging with a new `Debug` method in the logger.
+- Implemented fast transfer cache for better performance.
 
 ## License
 

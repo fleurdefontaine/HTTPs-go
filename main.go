@@ -4,11 +4,14 @@ import (
 	"crypto/tls"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
 	"HTTPs-Golang/enums"
 	"HTTPs-Golang/logger"
+)
+
+const (
+	defaultPort = "443"
 )
 
 func main() {
@@ -21,10 +24,11 @@ func main() {
 		})
 	}
 
-	port := "443"
-	if len(os.Args) > 1 {
-		port = os.Args[1]
-	}
+	log.Debug("Server configuration loaded", map[string]interface{}{
+		"config": server.Config,
+	})
+
+	port := getPort()
 
 	tlsConfig := &tls.Config{
 		MinVersion: tls.VersionTLS12,
@@ -45,20 +49,16 @@ func main() {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	log.Info("Server started", map[string]interface{}{
-		"port": port,
-	})
-
-	log.Info("Login URL", map[string]interface{}{
-		"url": server.Config.LoginURL,
-	})
-
-	certFile := filepath.Join("config", "SSL", "server.crt")
-	keyFile := filepath.Join("config", "SSL", "server.key")
-
-	if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil {
-		log.Fatal("Error starting server", map[string]interface{}{
+	if err := srv.ListenAndServeTLS("config/SSL/server.crt", "config/SSL/server.key"); err != nil {
+		log.Fatal("Server failed", map[string]interface{}{
 			"error": err,
 		})
 	}
+}
+
+func getPort() string {
+	if len(os.Args) > 1 {
+		return os.Args[1]
+	}
+	return defaultPort
 }

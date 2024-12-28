@@ -49,3 +49,7 @@ func (l *Logger) Fatal(message string, fields map[string]interface{}) {
 	l.log(Red, "FATAL", message, fields)
 	os.Exit(1)
 }
+
+func (l *Logger) Debug(message string, fields map[string]interface{}) {
+	l.log(Cyan, "DEBUG", message, fields)
+}

@@ -13,6 +13,13 @@ import (
 	"HTTPs-Golang/logger"
 )
 
+const (
+	configFilePath    = "config/config.json"
+	rateLimitDuration = 30 * time.Second
+	floodLimit        = 100
+	floodDuration     = 1 * time.Minute
+)
+
 type Config struct {
 	IP        string `json:"ip"`
 	Port      int    `json:"port"`
@@ -35,6 +42,19 @@ type rateLimitInfo struct {
 	count     int
 	timestamp time.Time
 }
+
+type cacheEntry struct {
+	data      []byte
+	timestamp time.Time
+}
+
+type floodInfo struct {
+	count     int
+	timestamp time.Time
+}
+
+var cache = sync.Map{}
+var floodProtection = sync.Map{}
 
 func NewServer() (*Server, error) {
 	s := &Server{
@@ -59,7 +79,7 @@ func NewServer() (*Server, error) {
 }
 
 func (s *Server) loadConfig() error {
-	data, err := os.ReadFile(filepath.Join("config", "config.json"))
+	data, err := os.ReadFile(filepath.Join(configFilePath))
 	if err != nil {
 		return fmt.Errorf("reading config: %w", err)
 	}
@@ -105,12 +125,22 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.checkRateLimit(clientIP) {
-		loggers.Warn("Rate limit exceeded", map[string]interface{}{
+	if !s.checkFloodProtection(clientIP) {
+		loggers.Warn("Flood attack detected", map[string]interface{}{
 			"client": clientIP,
 		})
 		http.Error(w, "Too many requests", http.StatusTooManyRequests)
 		return
+	}
+
+	if !strings.HasPrefix(r.URL.Path, "/growtopia/server_data.php") && !strings.HasPrefix(r.URL.Path, "/cache") {
+		if !s.checkRateLimit(clientIP) {
+			loggers.Warn("Rate limit exceeded", map[string]interface{}{
+				"client": clientIP,
+			})
+			http.Error(w, "Too many requests", http.StatusTooManyRequests)
+			return
+		}
 	}
 
 	switch r.URL.Path {
@@ -152,7 +182,7 @@ func (s *Server) checkRateLimit(ip string) bool {
 		return true
 	}
 
-	if now.Sub(info.timestamp) > 30*time.Second {
+	if now.Sub(info.timestamp) > rateLimitDuration {
 		info.count = 1
 		info.timestamp = now
 		return true
@@ -162,15 +192,44 @@ func (s *Server) checkRateLimit(ip string) bool {
 	return info.count <= s.Config.RateLimit
 }
 
+func (s *Server) checkFloodProtection(ip string) bool {
+	now := time.Now()
+	value, ok := floodProtection.LoadOrStore(ip, &floodInfo{count: 1, timestamp: now})
+	info := value.(*floodInfo)
+
+	if !ok {
+		return true
+	}
+
+	if now.Sub(info.timestamp) > floodDuration {
+		info.count = 1
+		info.timestamp = now
+		return true
+	}
+
+	info.count++
+	if info.count > floodLimit {
+		floodProtection.Store(ip, &floodInfo{count: floodLimit, timestamp: now})
+		return false
+	}
+
+	return true
+}
+
 func (s *Server) handleServerData(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	if _, ok := s.allowedUserAgents[r.Header.Get("User-Agent")]; !ok {
+	userAgent := r.Header.Get("User-Agent")
+	if _, ok := s.allowedUserAgents[userAgent]; !ok {
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
+	}
+
+	if userAgent == "UbiServices_SDK_2022.Release.9_ANDROID32_static" {
+		s.serverDataResp += "\nmaint|3rd Apps(Growlauncher/GENTAHAX) are not allowed in this server man. - Blocked by @Ravn_n"
 	}
 
 	fmt.Fprint(w, s.serverDataResp)
@@ -182,21 +241,38 @@ func (s *Server) handleCacheRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, ok := s.allowedUserAgents[r.Header.Get("User-Agent")]; !ok {
+	userAgent := r.Header.Get("User-Agent")
+	if _, ok := s.allowedUserAgents[userAgent]; !ok {
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 
-	filePath := "." + r.URL.Path
+	cleanPath := filepath.Clean(r.URL.Path)
+	if !strings.HasPrefix(cleanPath, "/cache") {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	if entry, ok := cache.Load(cleanPath); ok {
+		cached := entry.(*cacheEntry)
+		if time.Since(cached.timestamp) < 5*time.Minute {
+			w.Header().Set("Content-Type", getMIMEType(cleanPath))
+			w.Write(cached.data)
+			return
+		}
+		cache.Delete(cleanPath)
+	}
+
+	filePath := "." + cleanPath
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		redirectURL := fmt.Sprintf("https://ubistatic-a.akamaihd.net/%s%s", s.Config.CDN, r.URL.Path)
+		redirectURL := fmt.Sprintf("https://ubistatic-a.akamaihd.net/%s%s", s.Config.CDN, cleanPath)
 		http.Redirect(w, r, redirectURL, http.StatusMovedPermanently)
 		return
 	}
 
-	mimeType := getMIMEType(filePath)
-	w.Header().Set("Content-Type", mimeType)
+	cache.Store(cleanPath, &cacheEntry{data: data, timestamp: time.Now()})
+	w.Header().Set("Content-Type", getMIMEType(filePath))
 	w.Write(data)
 }
 
